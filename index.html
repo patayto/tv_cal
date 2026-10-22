@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TV Calendar</title>
+<!-- ponytail: FullCalendar 6.1.22 (legacy tag), not 7.1.3. v7 is one week old and its global-bundle API is unverified. -->
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.22/index.global.min.js"></script>
+<script src="lib.js"></script>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f6f4; --panel: #fff; --text: #1d1d1f; --muted: #6b6b70; --line: #e2e2df;
+    --accent: #2f6fde; --tv: #2f6fde; --movie: #c95f22;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #141416; --panel: #1d1d20; --text: #ececee; --muted: #9a9aa0; --line: #2f2f34;
+            --accent: #6b9bff; --tv: #3f78e0; --movie: #c9692e; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.4 system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 18px; margin: 0 auto 0 0; }
+  #status { color: var(--muted); min-height: 1.4em; margin: 8px 16px 0; }
+  .layout { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 24px; padding: 12px 16px 24px; align-items: start; }
+  @media (max-width: 820px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+  aside { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+  aside section, details, main { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+  summary { cursor: pointer; font-weight: 600; }
+  details form { margin: 8px 0 4px; }
+  h2 { font-size: 13px; margin: 0 0 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  input, select, button { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+  button { cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  form { display: flex; gap: 6px; flex-wrap: wrap; }
+  form input:not([size]), form select { flex: 1; min-width: 0; }
+  ul { list-style: none; margin: 8px 0 0; padding: 0; max-height: 360px; overflow: auto; }
+  ul:empty { display: none; }
+  li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); }
+  li img, li .noimg { width: 32px; height: 48px; object-fit: cover; border-radius: 3px; background: var(--line); flex: none; }
+  li .name { flex: 1; min-width: 0; }
+  small { color: var(--muted); }
+  .badge.tv { color: var(--tv); } .badge.movie { color: var(--movie); }
+  footer { padding: 0 16px 16px; color: var(--muted); font-size: 13px; }
+  footer a { color: inherit; }
+  .fc {
+    --fc-border-color: var(--line); --fc-page-bg-color: var(--panel); --fc-neutral-bg-color: var(--bg);
+    --fc-list-event-hover-bg-color: var(--bg);
+    --fc-today-bg-color: color-mix(in srgb, var(--accent) 12%, transparent);
+    --fc-button-bg-color: var(--bg); --fc-button-border-color: var(--line); --fc-button-text-color: var(--text);
+    --fc-button-hover-bg-color: var(--line); --fc-button-hover-border-color: var(--line);
+    --fc-button-active-bg-color: var(--line); --fc-button-active-border-color: var(--accent);
+  }
+  .fc a { color: inherit; }
+  .fc .fc-toolbar-title { font-size: 18px; margin: 0; text-transform: none; letter-spacing: normal; color: var(--text); }
+  .fc .fc-event.tv { background: var(--tv); border-color: var(--tv); --fc-event-dot-color: var(--tv); }
+  .fc .fc-event.movie { background: var(--movie); border-color: var(--movie); --fc-event-dot-color: var(--movie); }
+  .fc .fc-list-event.tv, .fc .fc-list-event.movie { background: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>TV Calendar</h1>
+  <button id="refresh" title="Ignore the 24-hour cache and fetch all dates again">Refresh dates</button>
+  <button id="export-ics">Export .ics</button>
+  <button id="export-json">Export watchlist</button>
+  <button id="import-btn">Import watchlist</button>
+  <button id="login">Log in with TMDB</button>
+  <input type="file" id="import-json" accept="application/json,.json" hidden>
+</header>
+<p id="status" role="status"></p>
+<div class="layout">
+  <aside>
+    <details id="settings">
+      <summary>Settings</summary>
+      <form id="settings-form">
+        <input id="key" type="password" placeholder="TMDB API Read Access Token" autocomplete="off" required>
+        <input id="region" size="3" maxlength="2" pattern="[A-Za-z]{2}" title="Two-letter country code, for example GB" required>
+        <button>Save</button>
+      </form>
+      <small>The key stays in this browser only. Get one at
+        <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">themoviedb.org/settings/api</a>.</small>
+    </details>
+    <section>
+      <h2>Search</h2>
+      <form id="search-form">
+        <input type="search" id="q" placeholder="Severance, Dune…" required>
+        <button>Search</button>
+      </form>
+      <ul id="results"></ul>
+    </section>
+    <section>
+      <h2>Browse</h2>
+      <form id="browse-form">
+        <select id="browse-list">
+          <option value="trending">Trending this week</option>
+          <option value="upcoming">Upcoming movies</option>
+          <option value="discover">Discover TV</option>
+        </select>
+        <button>Load</button>
+        <select id="genre" hidden><option value="">Any genre</option></select>
+        <select id="provider" hidden><option value="">Any streaming service</option></select>
+      </form>
+      <ul id="browse"></ul>
+    </section>
+    <section>
+      <h2>Watchlist</h2>
+      <ul id="watchlist"></ul>
+    </section>
+  </aside>
+  <main><div id="calendar"></div></main>
+</div>
+<footer>
+  This product uses the <a href="https://www.themoviedb.org/" target="_blank" rel="noopener">TMDB</a> API but is not endorsed or certified by TMDB.
+</footer>
+<script>
+const $ = s => document.querySelector(s);
+const DAY = 864e5;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const store = {
+  get(k, fallback) { try { return JSON.parse(localStorage.getItem(k)) ?? fallback; } catch { return fallback; } },
+  set(k, v) { localStorage.setItem(k, JSON.stringify(v)); },
+};
+const status = msg => { $('#status').textContent = msg; };
+const region = () => store.get('region', 'GB');
+const guard = fn => async e => { e?.preventDefault?.(); try { await fn(e); } catch (err) { status(err.message); } };
+let watchlist = store.get('watchlist', []);
+let allEvents = [];
+
+// Call TMDB v3 with the API Read Access Token (Bearer header). Account calls also send the login session_id.
+async function tmdb(path, params = {}, { method = 'GET', body } = {}) {
+  const key = store.get('tmdbKey', '');
+  if (!key) throw new Error('Add your TMDB key in Settings.');
+  const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== '' && v != null));
+  const headers = { Authorization: `Bearer ${key}` };
+  if (body) headers['Content-Type'] = 'application/json;charset=utf-8';
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`https://api.themoviedb.org/3/${path}?${qs}`, { method, headers, body: body && JSON.stringify(body) });
+    if (res.status === 429 && attempt < 5) { await sleep((+res.headers.get('Retry-After') || 2 ** attempt) * 1000); continue; }
+    if (res.status === 401) {
+      // Open Settings so the user can correct the token right away.
+      $('#settings').open = true;
+      $('#key').focus();
+      $('#key').select();
+      throw new Error('TMDB refused the request (401). Paste the API Read Access Token (the long one that starts with eyJ) in Settings and save again. If the token is correct, log out and log in again.');
+    }
+    if (!res.ok) throw new Error(`TMDB returned ${res.status} for ${path}.`);
+    return res.json();
+  }
+}
+
+// Cache the derived events, not raw responses: season payloads carry cast and crew and would fill localStorage.
+async function eventsFor(item) {
+  const cacheKey = `events:${item.type}:${item.id}:${region()}`;
+  const hit = store.get(cacheKey);
+  if (hit && Date.now() - hit.t < DAY) return hit.events;
+  let events;
+  if (item.type === 'tv') {
+    const show = await tmdb(`tv/${item.id}`);
+    const seasons = await Promise.all(seasonsToFetch(show).map(n => tmdb(`tv/${item.id}/season/${n}`)));
+    events = tvEvents(item, seasons);
+  } else {
+    events = movieEvents(item, await tmdb(`movie/${item.id}`, { append_to_response: 'release_dates' }), region());
+  }
+  try { store.set(cacheKey, { t: Date.now(), events }); } catch {} // storage full: work uncached
+  return events;
+}
+
+const calendar = new FullCalendar.Calendar($('#calendar'), {
+  initialView: 'dayGridMonth',
+  firstDay: 1,
+  height: 'auto',
+  dayMaxEvents: true,
+  headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,listMonth' },
+  buttonText: { dayGridMonth: 'month', listMonth: 'list' },
+  eventClick(info) { info.jsEvent.preventDefault(); window.open(info.event.url, '_blank', 'noopener'); },
+});
+calendar.render();
+
+let renderId = 0;
+async function renderCalendar() {
+  if (!store.get('tmdbKey')) return status('Add your TMDB key in Settings to load dates.');
+  const id = ++renderId;
+  status('Loading dates…');
+  const results = await Promise.allSettled(watchlist.map(eventsFor));
+  if (id !== renderId) return; // a newer render started meanwhile
+  allEvents = results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
+  calendar.getEventSources().forEach(s => s.remove());
+  calendar.addEventSource(allEvents.map(e => ({
+    id: e.id, title: `${e.title} · ${e.label}`, start: e.date, allDay: true, url: e.url, classNames: [e.kind],
+  })));
+  const failed = results.filter(r => r.status === 'rejected');
+  status(failed.length
+    ? `${failed.length} of ${watchlist.length} titles failed to load: ${failed[0].reason.message}`
+    : `${allEvents.length} dates from ${watchlist.length} titles.`);
+}
+
+function el(tag, props = {}, ...kids) {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...kids);
+  return node;
+}
+const itemKey = i => `${i.type}:${i.id}`;
+const inWatchlist = i => watchlist.some(w => itemKey(w) === itemKey(i));
+
+function card(item, button) {
+  const img = item.poster
+    ? el('img', { src: `https://image.tmdb.org/t/p/w92${item.poster}`, alt: '', loading: 'lazy' })
+    : el('span', { className: 'noimg' });
+  const meta = el('small', { className: `badge ${item.type}` }, item.type === 'tv' ? 'TV' : 'Movie', item.year ? ` · ${item.year}` : '');
+  return el('li', {}, img, el('span', { className: 'name' }, item.title, el('br'), meta), button);
+}
+
+function showResults(list, results, defaultType) {
+  const items = results
+    .map(r => ({ r, type: r.media_type || defaultType }))
+    .filter(({ type }) => type === 'tv' || type === 'movie')
+    .map(({ r, type }) => {
+      const item = toItem(r, type);
+      const added = inWatchlist(item);
+      const btn = el('button', { textContent: added ? 'Added' : 'Add', disabled: added });
+      btn.onclick = guard(async () => {
+        btn.disabled = true;
+        try { await add(item); btn.textContent = 'Added'; } catch (err) { btn.disabled = false; throw err; }
+      });
+      return card({ ...item, year: (r.release_date || r.first_air_date || '').slice(0, 4) }, btn);
+    });
+  list.replaceChildren(...(items.length ? items : [el('li', {}, 'No results.')]));
+}
+
+const toItem = (r, type) => ({ source: 'tmdb', id: r.id, type, title: r.title || r.name, poster: r.poster_path });
+
+// Logged in: the TMDB account watchlist is the source of truth, and localStorage only caches it for a fast first render.
+// Logged out: localStorage is the only copy.
+const session = () => store.get('session');
+
+async function setOnTmdb(item, on) {
+  const s = session();
+  if (!s) return;
+  await tmdb(`account/${s.accountId}/watchlist`, { session_id: s.id },
+    { method: 'POST', body: { media_type: item.type, media_id: item.id, watchlist: on } });
+}
+
+async function fetchTmdbWatchlist({ id, accountId }) {
+  const lists = await Promise.all([['tv', 'tv'], ['movie', 'movies']].map(async ([type, path]) => {
+    const items = [];
+    for (let page = 1, total = 1; page <= total; page++) {
+      const data = await tmdb(`account/${accountId}/watchlist/${path}`, { session_id: id, page });
+      total = data.total_pages;
+      items.push(...data.results.map(r => toItem(r, type)));
+    }
+    return items;
+  }));
+  return lists.flat();
+}
+
+function saveWatchlist() { store.set('watchlist', watchlist); renderWatchlist(); renderCalendar(); }
+async function add(item) {
+  if (inWatchlist(item)) return;
+  await setOnTmdb(item, true);
+  watchlist.push(item);
+  saveWatchlist();
+}
+
+function renderWatchlist() {
+  $('#watchlist').replaceChildren(...(watchlist.length ? watchlist.map(item => {
+    const btn = el('button', { textContent: 'Remove' });
+    btn.onclick = guard(async () => {
+      btn.disabled = true;
+      try { await setOnTmdb(item, false); } catch (err) { btn.disabled = false; throw err; }
+      watchlist = watchlist.filter(w => itemKey(w) !== itemKey(item));
+      saveWatchlist();
+    });
+    return card(item, btn);
+  }) : [el('li', {}, 'Empty. Search or browse to add titles.')]));
+}
+
+function renderAccount() { $('#login').textContent = session() ? 'Log out of TMDB' : 'Log in with TMDB'; }
+
+// TMDB v3 login: get a request token, the user approves it on themoviedb.org, and TMDB redirects back here with it.
+$('#login').onclick = guard(async () => {
+  const s = session();
+  if (s) {
+    await tmdb('authentication/session', {}, { method: 'DELETE', body: { session_id: s.id } }).catch(() => {});
+    localStorage.removeItem('session');
+    renderAccount();
+    return status('Logged out. The watchlist now saves on this device only.');
+  }
+  // A file:// page has the origin "null", so TMDB cannot redirect back to it.
+  if (location.protocol === 'file:') throw new Error('Login needs the page on http(s). Run python3 -m http.server, or use the GitHub Pages site.');
+  const { request_token } = await tmdb('authentication/token/new');
+  location.href = `https://www.themoviedb.org/authenticate/${request_token}?redirect_to=${encodeURIComponent(location.origin + location.pathname)}`;
+});
+
+async function finishLogin(request_token) {
+  const { session_id } = await tmdb('authentication/session/new', {}, { method: 'POST', body: { request_token } });
+  const account = await tmdb('account', { session_id });
+  const s = { id: session_id, accountId: account.id };
+  const remote = await fetchTmdbWatchlist(s);
+  store.set('session', s);
+  // Copy titles saved on this device before login into the account, so login never drops them.
+  const localOnly = watchlist.filter(i => !remote.some(r => itemKey(r) === itemKey(i)));
+  for (const i of localOnly) await setOnTmdb(i, true);
+  watchlist = [...remote, ...localOnly];
+}
+
+const syncWatchlist = guard(async () => {
+  const params = new URLSearchParams(location.search);
+  if (params.has('request_token')) {
+    history.replaceState(null, '', location.pathname);
+    if (params.get('approved') !== 'true') return status('TMDB login was cancelled.');
+    await finishLogin(params.get('request_token'));
+  } else if (session()) {
+    watchlist = await fetchTmdbWatchlist(session());
+  } else {
+    return;
+  }
+  renderAccount();
+  saveWatchlist();
+});
+
+const loadFilters = guard(async () => {
+  const [genres, providers] = await Promise.all([tmdb('genre/tv/list'), tmdb('watch/providers/tv', { watch_region: region() })]);
+  const fill = (sel, opts) => sel.replaceChildren(sel.options[0], ...opts.map(([value, textContent]) => el('option', { value, textContent })));
+  fill($('#genre'), genres.genres.map(g => [g.id, g.name]));
+  fill($('#provider'), providers.results
+    .sort((a, b) => a.provider_name.localeCompare(b.provider_name))
+    .map(p => [p.provider_id, p.provider_name]));
+});
+
+$('#settings-form').onsubmit = e => {
+  e.preventDefault();
+  store.set('tmdbKey', $('#key').value.trim());
+  store.set('region', $('#region').value.toUpperCase());
+  $('#settings').open = false;
+  status('Checking the token…');
+  loadFilters();
+  if (session()) syncWatchlist(); else renderCalendar();
+};
+
+$('#search-form').onsubmit = guard(async () => {
+  status('Searching…');
+  const data = await tmdb('search/multi', { query: $('#q').value.trim() });
+  showResults($('#results'), data.results);
+  status('');
+});
+
+$('#browse-list').onchange = () => {
+  const hide = $('#browse-list').value !== 'discover';
+  $('#genre').hidden = hide;
+  $('#provider').hidden = hide;
+};
+$('#browse-form').onsubmit = guard(async () => {
+  const which = $('#browse-list').value;
+  const data = which === 'trending' ? await tmdb('trending/all/week')
+    : which === 'upcoming' ? await tmdb('movie/upcoming', { region: region() })
+    : await tmdb('discover/tv', {
+        sort_by: 'popularity.desc', watch_region: region(),
+        with_genres: $('#genre').value, with_watch_providers: $('#provider').value,
+      });
+  showResults($('#browse'), data.results, which === 'upcoming' ? 'movie' : 'tv');
+});
+
+$('#refresh').onclick = () => {
+  Object.keys(localStorage).filter(k => k.startsWith('events:')).forEach(k => localStorage.removeItem(k));
+  renderCalendar();
+};
+
+function download(name, text, type) {
+  const a = el('a', { href: URL.createObjectURL(new Blob([text], { type })), download: name });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+$('#export-ics').onclick = () => download('tv_cal.ics', toIcs(allEvents), 'text/calendar');
+$('#export-json').onclick = () => download('watchlist.json', JSON.stringify(watchlist, null, 2), 'application/json');
+$('#import-btn').onclick = () => $('#import-json').click();
+$('#import-json').onchange = guard(async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  const data = JSON.parse(await file.text());
+  if (!Array.isArray(data)) throw new Error('Import failed: the file is not a watchlist.');
+  // Untrusted file: keep only well-formed entries and known fields.
+  const items = data
+    .filter(i => i && Number.isInteger(i.id) && (i.type === 'tv' || i.type === 'movie') && typeof i.title === 'string')
+    .map(({ id, type, title, poster }) => ({ source: 'tmdb', id, type, title, poster: /^\/[\w.-]+$/.test(poster) ? poster : null }));
+  try {
+    for (const i of items) {
+      if (inWatchlist(i)) continue;
+      await setOnTmdb(i, true);
+      watchlist.push(i);
+    }
+  } finally {
+    saveWatchlist(); // keep the titles that reached TMDB even if a later one fails
+  }
+});
+
+$('#key').value = store.get('tmdbKey', '');
+$('#region').value = region();
+if (!$('#key').value) $('#settings').open = true;
+renderAccount();
+renderWatchlist();
+renderCalendar(); // cached list first, then syncWatchlist replaces it with the TMDB list
+if ($('#key').value) loadFilters();
+syncWatchlist();
+</script>
+</body>
+</html>

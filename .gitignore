@@ -1,0 +1,8 @@
+.DS_Store
+
+# Postman workspace. It holds the TMDB API key in plain text.
+postman/
+.postman/
+
+# Local editor and tool state
+.impeccable/
